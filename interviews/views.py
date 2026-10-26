@@ -448,9 +448,9 @@ class InterviewSignalView(generics.GenericAPIView):
                 if row:
                     sig_id = row[0]
 
-                # Occasional cleanup: delete signals older than 5 minutes
+                # Occasional cleanup: delete ephemeral WebRTC signals older than 5 minutes (preserve chat history!)
                 if sig_id % 25 == 0:
-                    cursor.execute("DELETE FROM room_signals_live WHERE created_at < %s", [now - 300])
+                    cursor.execute("DELETE FROM room_signals_live WHERE sig_type != 'chat' AND created_at < %s", [now - 300])
         except Exception:
             if room not in ROOM_SIGNALS:
                 ROOM_SIGNALS[room] = []
@@ -467,6 +467,109 @@ class InterviewSignalView(generics.GenericAPIView):
                 ROOM_SIGNALS[room] = ROOM_SIGNALS[room][-200:]
 
         return Response({'status': 'sent', 'id': sig_id}, status=status.HTTP_200_OK)
+
+
+class InterviewRoomChatView(generics.GenericAPIView):
+    permission_classes = (permissions.AllowAny,)
+
+    def get(self, request):
+        _init_signaling_db()
+        room = request.query_params.get('room', '').strip()
+        if not room:
+            return Response({'room': '', 'messages': []}, status=status.HTTP_200_OK)
+
+        messages = []
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("""
+                    SELECT id, from_user, payload, created_at
+                    FROM room_signals_live
+                    WHERE room = %s AND sig_type = 'chat'
+                    ORDER BY id ASC
+                    LIMIT 200
+                """, [room])
+                for row in cursor.fetchall():
+                    raw_payload = row[2]
+                    parsed = raw_payload
+                    try:
+                        parsed = json.loads(raw_payload) if isinstance(raw_payload, str) else raw_payload
+                    except Exception:
+                        pass
+                    if isinstance(parsed, dict):
+                        messages.append({
+                            'id': row[0],
+                            'sender': parsed.get('sender', 'Participant'),
+                            'text': parsed.get('text', ''),
+                            'time': parsed.get('time', ''),
+                            'from_user': row[1],
+                            'timestamp': row[3],
+                        })
+        except Exception:
+            in_mem = ROOM_SIGNALS.get(room, [])
+            for s in in_mem:
+                if s.get('type') == 'chat':
+                    p = s.get('payload', {})
+                    if isinstance(p, dict):
+                        messages.append({
+                            'id': s.get('id', 0),
+                            'sender': p.get('sender', 'Participant'),
+                            'text': p.get('text', ''),
+                            'time': p.get('time', ''),
+                            'from_user': s.get('from_user', ''),
+                            'timestamp': s.get('timestamp', 0),
+                        })
+
+        return Response({'room': room, 'messages': messages}, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        _init_signaling_db()
+        room = request.data.get('room', '').strip()
+        sender = request.data.get('sender', 'Participant').strip()
+        text = request.data.get('text', '').strip()
+        time_str = request.data.get('time', '').strip()
+        from_user = str(request.data.get('from_user', '')).strip()
+
+        if not room or not text:
+            return Response({'error': 'Room and text are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        now = time.time()
+        payload = {
+            'sender': sender,
+            'text': text,
+            'time': time_str or time.strftime('%H:%M'),
+        }
+        payload_str = json.dumps(payload)
+        sig_id = 1
+
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("""
+                    INSERT INTO room_signals_live (room, from_user, to_user, sig_type, payload, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                """, [room, from_user, 'all', 'chat', payload_str, now])
+                row = cursor.fetchone()
+                if row:
+                    sig_id = row[0]
+        except Exception:
+            if room not in ROOM_SIGNALS:
+                ROOM_SIGNALS[room] = []
+            sig_id = len(ROOM_SIGNALS[room]) + 1
+            ROOM_SIGNALS[room].append({
+                'id': sig_id,
+                'from_user': from_user,
+                'to_user': 'all',
+                'type': 'chat',
+                'payload': payload,
+                'timestamp': now,
+            })
+
+        return Response({
+            'status': 'sent',
+            'id': sig_id,
+            'room': room,
+            'message': payload
+        }, status=status.HTTP_201_CREATED)
 
 
 class InterviewCleanupDummiesView(generics.GenericAPIView):
