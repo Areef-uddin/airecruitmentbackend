@@ -1,0 +1,9 @@
+@echo off
+cd /d "c:\Users\home\Documents\djanolearning\New folder (2)\ai_recruitment\backend"
+echo [1/3] Adding files to git...
+git add -A
+echo [2/3] Committing changes...
+git commit -m "fix: remove localhost redirect and switch to neon postgresql"
+echo [3/3] Pushing to GitHub origin main...
+git push origin main
+echo Done.
