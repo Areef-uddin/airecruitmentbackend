@@ -79,30 +79,31 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'config.wsgi.application'
 
-# Database: Uses DATABASE_URL (Neon/Supabase/Render Postgres) if provided, otherwise SQLite
-DATABASE_URL = os.getenv('DATABASE_URL')
-if DATABASE_URL:
-    try:
-        import dj_database_url
-        DATABASES = {
-            'default': dj_database_url.config(
-                default=DATABASE_URL,
-                conn_max_age=600,
-                conn_health_checks=True,
-            )
-        }
-    except Exception:
-        DATABASES = {
-            'default': {
-                'ENGINE': os.getenv('DB_ENGINE', 'django.db.backends.sqlite3'),
-                'NAME': BASE_DIR / os.getenv('DB_NAME', 'db.sqlite3'),
-            }
-        }
-else:
+# Database: Neon Serverless PostgreSQL (SQLite completely removed)
+NEON_DATABASE_URL = 'postgresql://neondb_owner:npg_xubYi1V9pBdq@ep-proud-dawn-b518mlpg-pooler.c-7.us-east-2.aws.neon.tech/neondb?sslmode=require'
+DATABASE_URL = os.getenv('DATABASE_URL', NEON_DATABASE_URL)
+
+try:
+    import dj_database_url
+    DATABASES = {
+        'default': dj_database_url.parse(
+            DATABASE_URL,
+            conn_max_age=600,
+            conn_health_checks=True,
+        )
+    }
+except Exception:
     DATABASES = {
         'default': {
-            'ENGINE': os.getenv('DB_ENGINE', 'django.db.backends.sqlite3'),
-            'NAME': BASE_DIR / os.getenv('DB_NAME', 'db.sqlite3'),
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': 'neondb',
+            'USER': 'neondb_owner',
+            'PASSWORD': 'npg_xubYi1V9pBdq',
+            'HOST': 'ep-proud-dawn-b518mlpg-pooler.c-7.us-east-2.aws.neon.tech',
+            'PORT': '5432',
+            'OPTIONS': {
+                'sslmode': 'require',
+            },
         }
     }
 
