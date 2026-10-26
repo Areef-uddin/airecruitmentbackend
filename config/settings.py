@@ -80,7 +80,7 @@ TEMPLATES = [
 WSGI_APPLICATION = 'config.wsgi.application'
 
 # Database: Neon Serverless PostgreSQL (SQLite completely removed)
-NEON_DATABASE_URL = 'postgresql://neondb_owner:npg_xubYi1V9pBdq@ep-proud-dawn-b518mlpg-pooler.c-7.us-east-2.aws.neon.tech/neondb?sslmode=require'
+NEON_DATABASE_URL = 'postgresql://neondb_owner:npg_xubYi1V9pBdq@ep-proud-dawn-b518mlpg-pooler.c-7.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
 DATABASE_URL = os.getenv('DATABASE_URL', NEON_DATABASE_URL)
 
 try:
