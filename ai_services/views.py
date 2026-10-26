@@ -103,3 +103,21 @@ class AIGrammarImproveView(generics.GenericAPIView):
         result = AIService.improve_text(text=text, mode=mode)
         return Response(result, status=status.HTTP_200_OK)
 
+
+class AIVoiceQuestionView(generics.GenericAPIView):
+    permission_classes = (permissions.AllowAny,)
+
+    def post(self, request):
+        job_title = request.data.get('job_title', 'Software Engineer')
+        skills = request.data.get('skills', [])
+        round_num = int(request.data.get('round', 1))
+        candidate_name = request.data.get('candidate_name', '')
+
+        result = AIService.generate_ai_interview_question(
+            job_title=job_title,
+            required_skills=skills,
+            question_num=round_num,
+            candidate_name=candidate_name
+        )
+        return Response(result, status=status.HTTP_200_OK)
+

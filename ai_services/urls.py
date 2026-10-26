@@ -7,6 +7,7 @@ from ai_services.views import (
     AIAssistantChatView,
     AITranslateView,
     AIGrammarImproveView,
+    AIVoiceQuestionView,
 )
 
 urlpatterns = [
@@ -17,4 +18,5 @@ urlpatterns = [
     path('assistant/', AIAssistantChatView.as_view(), name='ai-assistant-chat'),
     path('translate/', AITranslateView.as_view(), name='ai-translate'),
     path('improve-text/', AIGrammarImproveView.as_view(), name='ai-improve-text'),
+    path('voice-question/', AIVoiceQuestionView.as_view(), name='ai-voice-question'),
 ]

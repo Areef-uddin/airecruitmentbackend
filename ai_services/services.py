@@ -16,9 +16,9 @@ class AIService:
             return ""
 
         # Exclusively use Google Gemini
-        primary_model = os.getenv('AI_MODEL_NAME', 'gemini-3.6-flash')
+        primary_model = os.getenv('AI_MODEL_NAME', 'gemini-3-flash-preview')
         candidate_models = [primary_model]
-        for m in ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-flash-latest']:
+        for m in ['gemini-3-flash-preview', 'gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-3.1-pro-preview', 'gemini-flash-latest']:
             if m not in candidate_models:
                 candidate_models.append(m)
 
@@ -151,7 +151,11 @@ class AIService:
         if llm_response:
             try:
                 clean_json = llm_response.strip().removeprefix('```json').removesuffix('```').strip()
-                return json.loads(clean_json)
+                data = json.loads(clean_json)
+                for k in ['responsibilities', 'requirements', 'benefits']:
+                    if isinstance(data.get(k), list):
+                        data[k] = "\n".join(f"- {item}" for item in data[k])
+                return data
             except Exception:
                 pass
 
@@ -225,6 +229,35 @@ class AIService:
                 "ideal_answer_traits": "Structured logging, synthetic monitoring, APM instrumentation, and alerting thresholds."
             }
         ]
+
+    @classmethod
+    def generate_ai_interview_question(cls, job_title: str, required_skills: list = None, question_num: int = 1, candidate_name: str = "") -> dict:
+        system = (
+            "You are Nora, an expert autonomous AI technical interviewer conducting a live voice video interview. "
+            "Formulate ONE concise, highly articulate, conversational interview question to ask the candidate directly out loud. "
+            "Keep the phrasing natural for speech synthesis (avoid asterisks, markdown, bullet points). "
+            "Ask a progressive question appropriate for technical screening."
+        )
+        skills_str = ", ".join(required_skills) if required_skills else "Full Stack Software Engineering"
+        user = f"Job Position: {job_title}\nTarget Core Skills: {skills_str}\nQuestion Round #{question_num}\nCandidate Name: {candidate_name or 'Candidate'}"
+
+        llm_response = cls._call_llm(system, user, temperature=0.3)
+        question_text = llm_response.strip().replace('"', '').replace('*', '') if llm_response else ""
+        if not question_text:
+            presets = [
+                f"Hello {candidate_name or 'there'}! Welcome to your technical interview. Could you walk me through your background and the most complex architecture you have built?",
+                "How do you design high-availability backend microservices to maintain low latency during unexpected traffic spikes?",
+                "When building cross-platform user interfaces, what is your approach to state management, clean architecture, and reactive rendering?",
+                "Can you walk me through a difficult production bug or performance bottleneck you resolved recently?",
+                "How do you ensure test coverage, continuous integration, and seamless deployment in your team workflows?"
+            ]
+            question_text = presets[(question_num - 1) % len(presets)]
+
+        return {
+            "question": question_text,
+            "round": question_num,
+            "job_title": job_title
+        }
 
     @classmethod
     def evaluate_interview_session(cls, job_title: str, transcript: list) -> dict:
