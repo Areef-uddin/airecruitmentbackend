@@ -85,7 +85,11 @@ class InterviewListCreateView(generics.ListCreateAPIView):
         custom_room = self.request.data.get('room')
         meeting_link = self.request.data.get('meeting_link')
         if not meeting_link:
-            room_name = custom_room if (custom_room and str(custom_room).strip()) else f"interview_{interview.id}"
+            role_slug = ""
+            if app and app.job and app.job.title:
+                role_slug = "".join(c if c.isalnum() else "_" for c in app.job.title).strip("_")
+            role_prefix = f"{role_slug}_Interview" if role_slug else "Interview"
+            room_name = custom_room if (custom_room and str(custom_room).strip()) else f"{role_prefix}_{interview.id}"
             interview.meeting_link = f"/live-interview?room={room_name}&id={interview.id}"
         else:
             interview.meeting_link = meeting_link
@@ -484,6 +488,39 @@ class InterviewSignalView(generics.GenericAPIView):
                         history.append(msg_dict)
                         it_obj.ai_transcript = history
                         it_obj.save(update_fields=['ai_transcript'])
+            except Exception:
+                pass
+
+        # Handle meeting ended signal: update Interview and Application status to COMPLETED
+        if sig_type == 'meeting_ended':
+            try:
+                target_it_id = None
+                if room.startswith('interview_'):
+                    r_id = room.replace('interview_', '')
+                    if r_id.isdigit():
+                        target_it_id = int(r_id)
+                elif '_Interview_' in room:
+                    r_id = room.split('_Interview_')[-1]
+                    if r_id.isdigit():
+                        target_it_id = int(r_id)
+                it_obj = None
+                if target_it_id:
+                    it_obj = Interview.objects.filter(id=target_it_id).first()
+                if not it_obj:
+                    it_obj = Interview.objects.filter(meeting_link__icontains=room).first()
+                if it_obj:
+                    it_obj.status = InterviewStatus.COMPLETED
+                    it_obj.save(update_fields=['status'])
+                    if it_obj.application:
+                        it_obj.application.status = ApplicationStatus.INTERVIEW_COMPLETED
+                        it_obj.application.save(update_fields=['status'])
+                        Notification.objects.create(
+                            user=it_obj.application.candidate,
+                            title="Interview Concluded",
+                            message=f"Your interview session for {it_obj.application.job.title} has completed.",
+                            notification_type=NotificationType.SYSTEM_ALERT,
+                            link="/candidate/dashboard"
+                        )
             except Exception:
                 pass
 

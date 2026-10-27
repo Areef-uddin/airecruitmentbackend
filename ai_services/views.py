@@ -50,22 +50,93 @@ class AIMatchCandidateView(generics.GenericAPIView):
         return Response(result, status=status.HTTP_200_OK)
 
 
+from django.utils import timezone
+
 class AIGenerateInterviewQuestionsView(generics.GenericAPIView):
     permission_classes = (permissions.IsAuthenticated,)
 
     def post(self, request):
         job_id = request.data.get('job_id')
+        interview_id = request.data.get('interview_id')
         title = request.data.get('title')
         skills = request.data.get('skills', [])
+        resume_text = request.data.get('resume_text', '')
+        job_desc = request.data.get('job_description', '')
 
-        if job_id:
+        if interview_id:
+            from interviews.models import Interview
+            it = Interview.objects.filter(id=interview_id).select_related('application', 'application__job', 'application__candidate', 'application__resume').first()
+            if it and it.application:
+                if it.application.job:
+                    title = title or it.application.job.title
+                    job_desc = job_desc or it.application.job.description
+                    if not skills:
+                        skills = list(it.application.job.required_skills.values_list('skill__name', flat=True))
+                if it.application.resume:
+                    resume_text = resume_text or it.application.resume.extracted_text or str(it.application.resume.parsed_data)
+                elif it.application.candidate:
+                    resume_text = resume_text or f"Candidate: {it.application.candidate.get_full_name()}"
+
+        elif job_id:
             job = get_object_or_404(Job, id=job_id)
-            title = job.title
-            skills = list(job.required_skills.values_list('skill__name', flat=True))
+            title = title or job.title
+            job_desc = job_desc or job.description
+            if not skills:
+                skills = list(job.required_skills.values_list('skill__name', flat=True))
 
-        title = title or 'Full Stack Software Engineer'
-        questions = AIService.generate_interview_questions(job_title=title, required_skills=skills)
+        if not resume_text:
+            from resumes.models import Resume
+            primary_resume = Resume.objects.filter(candidate=request.user, is_primary=True).first() or Resume.objects.filter(candidate=request.user).first()
+            if primary_resume:
+                resume_text = primary_resume.extracted_text or str(primary_resume.parsed_data)
+
+        title = title or 'Software Engineer'
+        questions = AIService.generate_interview_questions(
+            job_title=title,
+            required_skills=skills,
+            resume_text=resume_text,
+            job_description=job_desc
+        )
         return Response({'job_title': title, 'questions': questions}, status=status.HTTP_200_OK)
+
+
+class AIEvaluateCandidateAnswerView(generics.GenericAPIView):
+    permission_classes = (permissions.IsAuthenticated,)
+
+    def post(self, request):
+        question = request.data.get('question', '').strip()
+        answer = request.data.get('answer', '').strip()
+        job_title = request.data.get('job_title', 'Software Engineer')
+        resume_text = request.data.get('resume_text', '')
+        interview_id = request.data.get('interview_id')
+
+        turn_eval = AIService.evaluate_candidate_turn(
+            question=question,
+            answer=answer,
+            job_title=job_title,
+            resume_text=resume_text
+        )
+
+        if interview_id:
+            from interviews.models import Interview
+            it = Interview.objects.filter(id=interview_id).first()
+            if it:
+                history = it.ai_transcript or []
+                history.append({
+                    'speaker': 'Nora',
+                    'text': question,
+                    'timestamp': timezone.now().isoformat()
+                })
+                history.append({
+                    'speaker': request.user.get_full_name() or 'Candidate',
+                    'text': answer,
+                    'score': turn_eval.get('score', 85),
+                    'timestamp': timezone.now().isoformat()
+                })
+                it.ai_transcript = history
+                it.save(update_fields=['ai_transcript'])
+
+        return Response(turn_eval, status=status.HTTP_200_OK)
 
 
 class AIAssistantChatView(generics.GenericAPIView):

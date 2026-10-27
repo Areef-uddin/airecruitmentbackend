@@ -158,15 +158,27 @@ class ChatAISuggestionsView(generics.GenericAPIView):
     def post(self, request):
         last_message = request.data.get('last_message', '').strip()
         context_text = request.data.get('context', '').strip()
+        draft = request.data.get('draft', '').strip() or request.data.get('typed_text', '').strip()
         role = getattr(request.user, 'role', 'RECRUITER')
 
-        system_prompt = (
-            f"You are an AI assistant in a professional recruitment chat platform. "
-            f"The user speaking is a {role}. "
-            f"Generate 3-4 natural, polite, and professional quick-reply suggestions for them. "
-            f"Return JSON strictly in the format: {{\"suggestions\": [\"reply 1\", \"reply 2\", \"reply 3\"]}}"
-        )
-        user_prompt = f"Last message in chat: \"{last_message}\"\nContext: {context_text}"
+        if draft:
+            # User typed something: provide refined, polished, and professional options of their exact thought
+            system_prompt = (
+                f"You are an expert AI communications coach in a tech recruitment platform. "
+                f"The user is a {role} who typed this draft message: \"{draft}\". "
+                f"Provide 3-4 distinct, polished, professional, and clear variations/improvements of the user's exact draft. "
+                f"Each suggestion should preserve their original intent while correcting grammar and improving tone and impact. "
+                f"Return JSON strictly: {{\"suggestions\": [\"option 1\", \"option 2\", \"option 3\"]}}"
+            )
+            user_prompt = f"User Draft: \"{draft}\"\nContext of conversation: {context_text or last_message}"
+        else:
+            system_prompt = (
+                f"You are an AI assistant in a professional recruitment chat platform. "
+                f"The user speaking is a {role}. "
+                f"Based on the conversation history and last message, generate 3-4 context-specific, intelligent replies. "
+                f"Return JSON strictly in the format: {{\"suggestions\": [\"reply 1\", \"reply 2\", \"reply 3\"]}}"
+            )
+            user_prompt = f"Last message in chat: \"{last_message}\"\nContext: {context_text}"
 
         llm_resp = AIService._call_llm(system_prompt, user_prompt, temperature=0.3)
         suggestions = []
@@ -181,8 +193,13 @@ class ChatAISuggestionsView(generics.GenericAPIView):
                 pass
 
         if not suggestions:
-            # Fallback high quality smart replies
-            if role == 'RECRUITER':
+            if draft:
+                suggestions = [
+                    f"Hi, {draft[0].upper() + draft[1:] if len(draft) > 1 else draft}.",
+                    f"I would like to follow up regarding: {draft}.",
+                    f"Thank you for your update. {draft}."
+                ]
+            elif role == 'RECRUITER':
                 suggestions = [
                     "Hello! Thank you for applying. We are impressed with your profile.",
                     "Would you be available for a 30-minute technical interview this week?",
@@ -198,3 +215,71 @@ class ChatAISuggestionsView(generics.GenericAPIView):
                 ]
 
         return Response({'suggestions': suggestions[:4]}, status=status.HTTP_200_OK)
+
+
+from django.utils import timezone
+from interviews.models import Interview
+
+class MeetingGroupsView(generics.GenericAPIView):
+    """
+    Returns meeting group rooms for reviewing live in-call chats and group discussions.
+    """
+    permission_classes = (permissions.IsAuthenticated,)
+
+    def get(self, request):
+        user = request.user
+        if user.is_candidate:
+            interviews = Interview.objects.filter(application__candidate=user).select_related('application__job', 'interviewer').order_by('-created_at')
+        else:
+            interviews = Interview.objects.all().select_related('application__candidate', 'application__job', 'interviewer').order_by('-created_at')
+
+        groups = []
+        for it in interviews:
+            room = it.meeting_link.split('room=')[-1].split('&')[0] if ('room=' in (it.meeting_link or '')) else f"interview_{it.id}"
+            job_title = it.application.job.title if (it.application and it.application.job) else it.title
+            candidate_name = it.application.candidate.get_full_name() if (it.application and it.application.candidate) else 'Candidate'
+            recruiter_name = it.interviewer.get_full_name() if it.interviewer else 'Recruiter'
+
+            history = it.ai_transcript or []
+            last_msg = history[-1] if (isinstance(history, list) and history) else None
+
+            groups.append({
+                'id': it.id,
+                'room': room,
+                'title': f"{job_title} - Group",
+                'role_based_name': room,
+                'job_title': job_title,
+                'candidate_name': candidate_name,
+                'recruiter_name': recruiter_name,
+                'scheduled_at': it.scheduled_at.isoformat() if it.scheduled_at else it.created_at.isoformat(),
+                'status': it.status,
+                'message_count': len(history) if isinstance(history, list) else 0,
+                'last_message': last_msg,
+                'chat_history': history if isinstance(history, list) else [],
+            })
+
+        return Response({'groups': groups, 'count': len(groups)}, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        """
+        Post a message to a meeting group chat.
+        """
+        it_id = request.data.get('interview_id')
+        text = request.data.get('text', '').strip()
+        if not it_id or not text:
+            return Response({'error': 'interview_id and text are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        it_obj = get_object_or_404(Interview, id=it_id)
+        history = list(it_obj.ai_transcript or [])
+        sender_name = request.user.get_full_name() or request.user.email
+        new_msg = {
+            'sender': sender_name,
+            'text': text,
+            'time': timezone.now().strftime('%I:%M %p'),
+            'user_id': str(request.user.id),
+        }
+        history.append(new_msg)
+        it_obj.ai_transcript = history
+        it_obj.save(update_fields=['ai_transcript'])
+
+        return Response({'status': 'sent', 'message': new_msg}, status=status.HTTP_201_CREATED)

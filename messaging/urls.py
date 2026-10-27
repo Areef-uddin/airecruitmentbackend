@@ -4,6 +4,7 @@ from messaging.views import (
     MessageListCreateView,
     ChatContactsView,
     ChatAISuggestionsView,
+    MeetingGroupsView,
 )
 
 urlpatterns = [
@@ -11,4 +12,5 @@ urlpatterns = [
     path('conversations/<int:conversation_id>/messages/', MessageListCreateView.as_view(), name='message-list-create'),
     path('contacts/', ChatContactsView.as_view(), name='chat-contacts'),
     path('ai-suggestions/', ChatAISuggestionsView.as_view(), name='chat-ai-suggestions'),
+    path('groups/', MeetingGroupsView.as_view(), name='meeting-groups'),
 ]

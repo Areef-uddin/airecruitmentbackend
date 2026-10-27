@@ -24,9 +24,38 @@ class ApplyJobView(generics.GenericAPIView):
             )
 
         resume_id = request.data.get('resume_id')
+        uploaded_resume_file = request.FILES.get('resume') or request.FILES.get('file')
         resume = None
-        if resume_id:
+
+        if uploaded_resume_file:
+            import os
+            from django.utils import timezone
+            file_name = uploaded_resume_file.name
+            file_size = uploaded_resume_file.size
+            file_ext = os.path.splitext(file_name)[1].lower().replace('.', '') or 'pdf'
+            resume = Resume.objects.create(
+                candidate=candidate,
+                file=uploaded_resume_file,
+                file_name=file_name,
+                file_size=file_size,
+                file_type=file_ext,
+                is_primary=True
+            )
+            try:
+                parsed_result = AIService.parse_resume(
+                    file_name=file_name,
+                    raw_text=f"Candidate: {candidate.get_full_name() or candidate.email}"
+                )
+                resume.parsed_data = parsed_result
+                resume.extracted_text = parsed_result.get('summary', '')
+                resume.ai_parsed = True
+                resume.parsed_at = timezone.now()
+                resume.save()
+            except Exception:
+                pass
+        elif resume_id:
             resume = Resume.objects.filter(id=resume_id, candidate=candidate).first()
+
         if not resume:
             resume = Resume.objects.filter(candidate=candidate, is_primary=True).first() or Resume.objects.filter(candidate=candidate).first()
 
