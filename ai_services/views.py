@@ -174,3 +174,25 @@ class AIGrammarImproveView(generics.GenericAPIView):
         result = AIService.improve_text(text=text, mode=mode)
         return Response(result, status=status.HTTP_200_OK)
 
+
+class AIGenerateMCQQuizzesView(generics.GenericAPIView):
+    permission_classes = (permissions.IsAuthenticated,)
+
+    def post(self, request):
+        role = request.data.get('role', 'Full Stack Engineer').strip()
+        seniority = request.data.get('seniority', 'Senior').strip()
+        resume_text = request.data.get('resume_text', '').strip()
+
+        if not resume_text:
+            from resumes.models import Resume
+            primary_resume = Resume.objects.filter(candidate=request.user, is_primary=True).first() or Resume.objects.filter(candidate=request.user).first()
+            if primary_resume:
+                resume_text = primary_resume.extracted_text or str(primary_resume.parsed_data)
+
+        quizzes = AIService.generate_mcq_quizzes(
+            role=role,
+            seniority=seniority,
+            resume_text=resume_text
+        )
+        return Response({'role': role, 'seniority': seniority, 'quizzes': quizzes}, status=status.HTTP_200_OK)
+

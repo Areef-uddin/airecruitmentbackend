@@ -283,3 +283,35 @@ class MeetingGroupsView(generics.GenericAPIView):
         it_obj.save(update_fields=['ai_transcript'])
 
         return Response({'status': 'sent', 'message': new_msg}, status=status.HTTP_201_CREATED)
+
+    def patch(self, request):
+        """
+        Rename group title or add a friend/member to the meeting group chat.
+        """
+        it_id = request.data.get('interview_id')
+        new_title = request.data.get('title', '').strip()
+        add_user_id = request.data.get('add_user_id')
+
+        it_obj = get_object_or_404(Interview, id=it_id)
+        if new_title:
+            it_obj.title = new_title
+
+        if add_user_id:
+            friend_user = get_object_or_404(User, id=add_user_id)
+            history = list(it_obj.ai_transcript or [])
+            sender_name = request.user.get_full_name() or request.user.email
+            added_name = friend_user.get_full_name() or friend_user.email
+            history.append({
+                'sender': 'System',
+                'text': f"👋 {added_name} was added to this group by {sender_name}.",
+                'time': timezone.now().strftime('%I:%M %p'),
+                'is_system': True,
+            })
+            it_obj.ai_transcript = history
+
+        it_obj.save()
+        return Response({
+            'status': 'updated',
+            'title': it_obj.title,
+            'interview_id': it_obj.id,
+        }, status=status.HTTP_200_OK)

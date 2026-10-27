@@ -52,8 +52,20 @@ class AIService:
 
     @classmethod
     def parse_resume(cls, file_name: str, raw_text: str) -> dict:
-        system = "You are an expert AI Resume Parser. Extract structured information in JSON format with keys: summary, skills, experience_years, education, certifications."
-        user = f"Extract resume details for {file_name}:\n{raw_text[:2000]}"
+        system = (
+            "You are an expert ATS (Applicant Tracking System) Scanner and Senior Tech Recruiter. "
+            "Analyze the provided resume thoroughly and return JSON strictly with keys:\n"
+            "- summary (string: 2-3 sentences overview)\n"
+            "- skills (list of string technical & domain skills found in resume)\n"
+            "- experience_years (number)\n"
+            "- ats_score (integer between 65 and 98 based on formatting, keyword density, and technical depth)\n"
+            "- ats_breakdown: { keywords_match (int 60-98), formatting_score (int 70-98), skills_density (int 60-98), impact_metrics (int 60-98) }\n"
+            "- strengths (list of 3-4 specific bullet points praising strong aspects of this candidate's resume)\n"
+            "- recommendations (list of 3-4 actionable tips to improve ATS score and recruiter appeal)\n"
+            "- education (list of objects: degree, institution, year)\n"
+            "- certifications (list of strings)"
+        )
+        user = f"Analyze Candidate Resume file '{file_name}':\n{raw_text[:3500]}"
 
         llm_response = cls._call_llm(system, user)
         if llm_response:
@@ -69,6 +81,71 @@ class AIService:
                 return parsed
             except Exception:
                 pass
+
+    @classmethod
+    def generate_mcq_quizzes(cls, role: str, seniority: str, resume_text: str = '') -> list:
+        system = (
+            "You are a Principal Software Engineering Assessor. "
+            f"Generate 5 challenging, realistic technical multiple choice questions tailored specifically for the candidate's target role '{role}' at '{seniority}' level. "
+            "If resume context is provided, ground questions in their claimed tech stack, system design concepts, and runtime behavior. "
+            "Return JSON strictly with format:\n"
+            "[\n"
+            "  {\n"
+            "    \"question\": \"Question text\",\n"
+            "    \"options\": [\"Option A\", \"Option B\", \"Option C\", \"Option D\"],\n"
+            "    \"correct\": 0,\n"
+            "    \"explanation\": \"Detailed technical explanation of why this answer is correct and real-world implications.\"\n"
+            "  }\n"
+            "]"
+        )
+        user = f"Target Role: {role}\nSeniority Level: {seniority}\nCandidate Background:\n{resume_text[:2000] if resume_text else 'Software Engineering'}"
+
+        res = cls._call_llm(system, user, temperature=0.3)
+        if res:
+            try:
+                clean = res.strip().removeprefix('```json').removesuffix('```').strip()
+                parsed = json.loads(clean)
+                if isinstance(parsed, list) and len(parsed) >= 3:
+                    return parsed
+            except Exception:
+                pass
+
+        # Fallback role-tailored questions if network is unreachable
+        return [
+            {
+                'question': f"In modern high-performance systems for {role}, what is the optimal pattern for scaling state across distributed services?",
+                'options': [
+                    'Event-driven asynchronous messaging with idempotent consumers and Redis caching',
+                    'Direct synchronous blocking RPC without circuit breakers',
+                    'Shared single SQL database with table-level locking',
+                    'Polling static JSON files every second',
+                ],
+                'correct': 0,
+                'explanation': 'Event-driven architectures decouple producers from consumers, and idempotency guarantees safety during message retries under heavy traffic.'
+            },
+            {
+                'question': f"When profiling memory and latency in production applications for {role}, which metric is most indicative of garbage collection pressure?",
+                'options': [
+                    'Short-lived object allocation rate causing frequent stop-the-world pauses',
+                    'Total hard disk partition size',
+                    'CPU fan speed',
+                    'CSS bundle compression ratio',
+                ],
+                'correct': 0,
+                'explanation': 'Rapid creation of transient objects causes high GC cycle frequency, which induces latency spikes and frame drops.'
+            },
+            {
+                'question': f"What is the recommended approach for zero-downtime database migrations in {role} backend pipelines?",
+                'options': [
+                    'Expand and contract pattern (backward-compatible columns added first, followed by phased data migration)',
+                    'Dropping columns immediately on active live production databases',
+                    'Disabling database connections for 4 hours during deployment',
+                    'Storing all relations in a single unstructured CSV file',
+                ],
+                'correct': 0,
+                'explanation': 'The expand/contract pattern guarantees that both old and new code versions can run simultaneously without query failures.'
+            }
+        ]
 
         # Intelligent Built-in Fallback Parsing
         inferred_skills = ["Python", "Dart", "Flutter", "Django", "PostgreSQL", "Docker", "REST API", "Git", "System Design"]

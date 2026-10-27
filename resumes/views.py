@@ -31,19 +31,36 @@ class ResumeListCreateView(generics.ListCreateAPIView):
             is_primary=is_first
         )
 
-        # Trigger AI parsing
+        # Extract actual text from uploaded PDF or document
+        raw_text = ""
+        if uploaded_file:
+            try:
+                uploaded_file.seek(0)
+                if file_ext == 'pdf':
+                    import pypdf
+                    reader = pypdf.PdfReader(uploaded_file)
+                    pages_text = [page.extract_text() or '' for page in reader.pages]
+                    raw_text = "\n".join(pages_text).strip()
+                elif file_ext in ['txt', 'md']:
+                    raw_text = uploaded_file.read().decode('utf-8', errors='ignore')
+            except Exception:
+                pass
+
+        if not raw_text:
+            raw_text = f"Candidate: {self.request.user.get_full_name()} ({self.request.user.email}). Title: Full Stack Developer."
+
+        # Trigger Gemini AI parsing & ATS scanning
         try:
             parsed_result = AIService.parse_resume(
                 file_name=file_name,
-                raw_text=f"Candidate Resume: {self.request.user.get_full_name()}. Skills: Python, Flutter, Django, AI Engineering, Cloud Architecture, PostgreSQL, Docker."
+                raw_text=raw_text
             )
-            resume_instance.extracted_text = parsed_result.get('summary', '')
+            resume_instance.extracted_text = raw_text[:5000] if raw_text else parsed_result.get('summary', '')
             resume_instance.parsed_data = parsed_result
             resume_instance.ai_parsed = True
             resume_instance.parsed_at = timezone.now()
             resume_instance.save()
         except Exception:
-            # Resilient fallback if AI service is offline
             pass
 
 
