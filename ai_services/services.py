@@ -16,9 +16,9 @@ class AIService:
             return ""
 
         # Exclusively use Google Gemini
-        primary_model = os.getenv('AI_MODEL_NAME', 'gemini-3.8-flash')
+        primary_model = os.getenv('AI_MODEL_NAME', 'gemini-3.5-flash')
         candidate_models = [primary_model]
-        for m in ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-flash-latest']:
+        for m in ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-flash-latest']:
             if m not in candidate_models:
                 candidate_models.append(m)
 

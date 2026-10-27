@@ -162,15 +162,18 @@ class ChatAISuggestionsView(generics.GenericAPIView):
         role = getattr(request.user, 'role', 'RECRUITER')
 
         if draft:
-            # User typed something: provide refined, polished, and professional options of their exact thought
+            # User typed something: provide refined, grammar-corrected, and professional options of their exact draft
             system_prompt = (
-                f"You are an expert AI communications coach in a tech recruitment platform. "
+                f"You are an expert AI communications coach in a professional tech recruitment platform. "
                 f"The user is a {role} who typed this draft message: \"{draft}\". "
-                f"Provide 3-4 distinct, polished, professional, and clear variations/improvements of the user's exact draft. "
-                f"Each suggestion should preserve their original intent while correcting grammar and improving tone and impact. "
-                f"Return JSON strictly: {{\"suggestions\": [\"option 1\", \"option 2\", \"option 3\"]}}"
+                f"Your task is to fix any spelling, grammatical, or punctuation mistakes, and provide 3 polished variations: "
+                f"1. A direct, clean, grammatically corrected version of their exact draft. "
+                f"2. A polite and professional variant. "
+                f"3. A concise, impactful variant. "
+                f"Preserve the user's core intent and meaning. Keep them short, natural, and ready to send in chat. "
+                f"Return JSON strictly in the format: {{\"suggestions\": [\"variant 1\", \"variant 2\", \"variant 3\"]}}"
             )
-            user_prompt = f"User Draft: \"{draft}\"\nContext of conversation: {context_text or last_message}"
+            user_prompt = f"User Draft: \"{draft}\"\nConversation Context: {context_text or last_message}"
         else:
             system_prompt = (
                 f"You are an AI assistant in a professional recruitment chat platform. "
