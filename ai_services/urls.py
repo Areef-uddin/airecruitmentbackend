@@ -9,6 +9,7 @@ from ai_services.views import (
     AITranslateView,
     AIGrammarImproveView,
     AIGenerateMCQQuizzesView,
+    AIMockSummaryView,
 )
 
 urlpatterns = [
@@ -18,6 +19,7 @@ urlpatterns = [
     path('generate-interview-questions/', AIGenerateInterviewQuestionsView.as_view(), name='ai-generate-interview-questions'),
     path('generate-quizzes/', AIGenerateMCQQuizzesView.as_view(), name='ai-generate-quizzes'),
     path('evaluate-answer/', AIEvaluateCandidateAnswerView.as_view(), name='ai-evaluate-answer'),
+    path('mock-summary/', AIMockSummaryView.as_view(), name='ai-mock-summary'),
     path('assistant/', AIAssistantChatView.as_view(), name='ai-assistant-chat'),
     path('translate/', AITranslateView.as_view(), name='ai-translate'),
     path('improve-text/', AIGrammarImproveView.as_view(), name='ai-improve-text'),

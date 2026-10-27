@@ -33,6 +33,24 @@ class ApplyJobView(generics.GenericAPIView):
             file_name = uploaded_resume_file.name
             file_size = uploaded_resume_file.size
             file_ext = os.path.splitext(file_name)[1].lower().replace('.', '') or 'pdf'
+
+            raw_text = ""
+            try:
+                uploaded_resume_file.seek(0)
+                if file_ext == 'pdf':
+                    import pypdf
+                    reader = pypdf.PdfReader(uploaded_resume_file)
+                    pages_text = [page.extract_text() or '' for page in reader.pages]
+                    raw_text = "\n".join(pages_text).strip()
+                elif file_ext in ['txt', 'md']:
+                    raw_text = uploaded_resume_file.read().decode('utf-8', errors='ignore')
+                uploaded_resume_file.seek(0)
+            except Exception:
+                pass
+
+            if not raw_text:
+                raw_text = f"Candidate: {candidate.get_full_name() or candidate.email}. Professional Technical Applicant for {job.title}."
+
             resume = Resume.objects.create(
                 candidate=candidate,
                 file=uploaded_resume_file,
@@ -44,10 +62,10 @@ class ApplyJobView(generics.GenericAPIView):
             try:
                 parsed_result = AIService.parse_resume(
                     file_name=file_name,
-                    raw_text=f"Candidate: {candidate.get_full_name() or candidate.email}"
+                    raw_text=raw_text
                 )
                 resume.parsed_data = parsed_result
-                resume.extracted_text = parsed_result.get('summary', '')
+                resume.extracted_text = raw_text[:5000] if raw_text else parsed_result.get('summary', '')
                 resume.ai_parsed = True
                 resume.parsed_at = timezone.now()
                 resume.save()

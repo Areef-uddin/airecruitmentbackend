@@ -196,3 +196,27 @@ class AIGenerateMCQQuizzesView(generics.GenericAPIView):
         )
         return Response({'role': role, 'seniority': seniority, 'quizzes': quizzes}, status=status.HTTP_200_OK)
 
+
+class AIMockSummaryView(generics.GenericAPIView):
+    permission_classes = (permissions.IsAuthenticated,)
+
+    def post(self, request):
+        role = request.data.get('role', 'Senior Software Engineer').strip()
+        seniority = request.data.get('seniority', 'Senior').strip()
+        history = request.data.get('history', [])
+        resume_text = request.data.get('resume_text', '').strip()
+
+        if not resume_text:
+            from resumes.models import Resume
+            primary_resume = Resume.objects.filter(candidate=request.user, is_primary=True).first() or Resume.objects.filter(candidate=request.user).first()
+            if primary_resume:
+                resume_text = primary_resume.extracted_text or str(primary_resume.parsed_data)
+
+        scorecard = AIService.generate_mock_interview_scorecard(
+            role=role,
+            seniority=seniority,
+            history=history,
+            resume_text=resume_text
+        )
+        return Response(scorecard, status=status.HTTP_200_OK)
+

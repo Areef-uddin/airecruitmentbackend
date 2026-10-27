@@ -240,22 +240,46 @@ class MeetingGroupsView(generics.GenericAPIView):
             candidate_name = it.application.candidate.get_full_name() if (it.application and it.application.candidate) else 'Candidate'
             recruiter_name = it.interviewer.get_full_name() if it.interviewer else 'Recruiter'
 
-            history = it.ai_transcript or []
-            last_msg = history[-1] if (isinstance(history, list) and history) else None
+            raw_history = it.ai_transcript or []
+            normalized_history = []
+            for m in (raw_history if isinstance(raw_history, list) else []):
+                if isinstance(m, dict):
+                    text_val = m.get('text') or m.get('body') or ''
+                    time_val = m.get('time') or m.get('created_at') or ''
+                    normalized_history.append({
+                        'id': m.get('id', id(m)),
+                        'sender': m.get('sender', 'Participant'),
+                        'text': text_val,
+                        'body': text_val,
+                        'time': time_val,
+                        'created_at': time_val,
+                        'user_id': str(m.get('user_id', '')),
+                    })
+
+            last_msg = normalized_history[-1] if normalized_history else None
+
+            # Distinct title per meeting group
+            clean_title = it.title
+            if not clean_title or clean_title == 'Interview Session' or clean_title.startswith('Interview with'):
+                clean_title = f"{job_title} • {candidate_name}"
 
             groups.append({
                 'id': it.id,
                 'room': room,
-                'title': f"{job_title} - Group",
+                'room_id': room,
+                'title': clean_title,
                 'role_based_name': room,
+                'role': job_title,
+                'company': it.application.job.company.name if (it.application and it.application.job and it.application.job.company) else 'TalentAI',
                 'job_title': job_title,
                 'candidate_name': candidate_name,
                 'recruiter_name': recruiter_name,
                 'scheduled_at': it.scheduled_at.isoformat() if it.scheduled_at else it.created_at.isoformat(),
                 'status': it.status,
-                'message_count': len(history) if isinstance(history, list) else 0,
+                'message_count': len(normalized_history),
                 'last_message': last_msg,
-                'chat_history': history if isinstance(history, list) else [],
+                'messages': normalized_history,
+                'chat_history': normalized_history,
             })
 
         return Response({'groups': groups, 'count': len(groups)}, status=status.HTTP_200_OK)
@@ -265,6 +289,14 @@ class MeetingGroupsView(generics.GenericAPIView):
         Post a message to a meeting group chat.
         """
         it_id = request.data.get('interview_id')
+        if not it_id and request.data.get('room'):
+            r = str(request.data.get('room'))
+            if 'interview_' in r:
+                try:
+                    it_id = int(r.replace('interview_', ''))
+                except Exception:
+                    pass
+
         text = request.data.get('text', '').strip()
         if not it_id or not text:
             return Response({'error': 'interview_id and text are required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -272,10 +304,14 @@ class MeetingGroupsView(generics.GenericAPIView):
         it_obj = get_object_or_404(Interview, id=it_id)
         history = list(it_obj.ai_transcript or [])
         sender_name = request.user.get_full_name() or request.user.email
+        now_time = timezone.now()
         new_msg = {
+            'id': int(now_time.timestamp() * 1000),
             'sender': sender_name,
             'text': text,
-            'time': timezone.now().strftime('%I:%M %p'),
+            'body': text,
+            'time': now_time.strftime('%I:%M %p'),
+            'created_at': now_time.isoformat(),
             'user_id': str(request.user.id),
         }
         history.append(new_msg)
