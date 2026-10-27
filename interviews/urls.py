@@ -9,7 +9,6 @@ from interviews.views import (
     InterviewRoomHeartbeatView,
     InterviewRoomLeaveView,
     InterviewSignalView,
-    InterviewRoomChatView,
     InterviewCleanupDummiesView,
 )
 
@@ -24,6 +23,5 @@ urlpatterns = [
     path('room-join/', InterviewRoomJoinView.as_view(), name='interview-room-join'),
     path('room-heartbeat/', InterviewRoomHeartbeatView.as_view(), name='interview-room-heartbeat'),
     path('room-leave/', InterviewRoomLeaveView.as_view(), name='interview-room-leave'),
-    path('room-chat/', InterviewRoomChatView.as_view(), name='interview-room-chat'),
     path('signal/', InterviewSignalView.as_view(), name='interview-signal'),
 ]

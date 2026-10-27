@@ -251,6 +251,7 @@ class InterviewRoomStatusView(generics.GenericAPIView):
                 'recruiter_id': interview.interviewer.id if interview.interviewer else None,
                 'status': interview.status,
                 'meeting_link': interview.meeting_link,
+                'chat_history': interview.ai_transcript or [],
             }
 
         return Response({
@@ -448,9 +449,9 @@ class InterviewSignalView(generics.GenericAPIView):
                 if row:
                     sig_id = row[0]
 
-                # Occasional cleanup: delete ephemeral WebRTC signals older than 5 minutes (preserve chat history!)
+                # Occasional cleanup: delete signals older than 5 minutes
                 if sig_id % 25 == 0:
-                    cursor.execute("DELETE FROM room_signals_live WHERE sig_type != 'chat' AND created_at < %s", [now - 300])
+                    cursor.execute("DELETE FROM room_signals_live WHERE created_at < %s", [now - 300])
         except Exception:
             if room not in ROOM_SIGNALS:
                 ROOM_SIGNALS[room] = []
@@ -463,113 +464,30 @@ class InterviewSignalView(generics.GenericAPIView):
                 'payload': payload,
                 'timestamp': now,
             })
-            if len(ROOM_SIGNALS[room]) > 200:
-                ROOM_SIGNALS[room] = ROOM_SIGNALS[room][-200:]
+        # Save chat messages to permanent meeting history
+        if sig_type == 'chat':
+            try:
+                target_it_id = None
+                if room.startswith('interview_'):
+                    r_id = room.replace('interview_', '')
+                    if r_id.isdigit():
+                        target_it_id = int(r_id)
+                it_obj = None
+                if target_it_id:
+                    it_obj = Interview.objects.filter(id=target_it_id).first()
+                if not it_obj:
+                    it_obj = Interview.objects.filter(meeting_link__icontains=room).first()
+                if it_obj:
+                    history = list(it_obj.ai_transcript or [])
+                    msg_dict = payload if isinstance(payload, dict) else (json.loads(payload) if isinstance(payload, str) else {'text': str(payload)})
+                    if not history or history[-1].get('text') != msg_dict.get('text'):
+                        history.append(msg_dict)
+                        it_obj.ai_transcript = history
+                        it_obj.save(update_fields=['ai_transcript'])
+            except Exception:
+                pass
 
         return Response({'status': 'sent', 'id': sig_id}, status=status.HTTP_200_OK)
-
-
-class InterviewRoomChatView(generics.GenericAPIView):
-    permission_classes = (permissions.AllowAny,)
-
-    def get(self, request):
-        _init_signaling_db()
-        room = request.query_params.get('room', '').strip()
-        if not room:
-            return Response({'room': '', 'messages': []}, status=status.HTTP_200_OK)
-
-        messages = []
-        try:
-            with connection.cursor() as cursor:
-                cursor.execute("""
-                    SELECT id, from_user, payload, created_at
-                    FROM room_signals_live
-                    WHERE room = %s AND sig_type = 'chat'
-                    ORDER BY id ASC
-                    LIMIT 200
-                """, [room])
-                for row in cursor.fetchall():
-                    raw_payload = row[2]
-                    parsed = raw_payload
-                    try:
-                        parsed = json.loads(raw_payload) if isinstance(raw_payload, str) else raw_payload
-                    except Exception:
-                        pass
-                    if isinstance(parsed, dict):
-                        messages.append({
-                            'id': row[0],
-                            'sender': parsed.get('sender', 'Participant'),
-                            'text': parsed.get('text', ''),
-                            'time': parsed.get('time', ''),
-                            'from_user': row[1],
-                            'timestamp': row[3],
-                        })
-        except Exception:
-            in_mem = ROOM_SIGNALS.get(room, [])
-            for s in in_mem:
-                if s.get('type') == 'chat':
-                    p = s.get('payload', {})
-                    if isinstance(p, dict):
-                        messages.append({
-                            'id': s.get('id', 0),
-                            'sender': p.get('sender', 'Participant'),
-                            'text': p.get('text', ''),
-                            'time': p.get('time', ''),
-                            'from_user': s.get('from_user', ''),
-                            'timestamp': s.get('timestamp', 0),
-                        })
-
-        return Response({'room': room, 'messages': messages}, status=status.HTTP_200_OK)
-
-    def post(self, request):
-        _init_signaling_db()
-        room = request.data.get('room', '').strip()
-        sender = request.data.get('sender', 'Participant').strip()
-        text = request.data.get('text', '').strip()
-        time_str = request.data.get('time', '').strip()
-        from_user = str(request.data.get('from_user', '')).strip()
-
-        if not room or not text:
-            return Response({'error': 'Room and text are required'}, status=status.HTTP_400_BAD_REQUEST)
-
-        now = time.time()
-        payload = {
-            'sender': sender,
-            'text': text,
-            'time': time_str or time.strftime('%H:%M'),
-        }
-        payload_str = json.dumps(payload)
-        sig_id = 1
-
-        try:
-            with connection.cursor() as cursor:
-                cursor.execute("""
-                    INSERT INTO room_signals_live (room, from_user, to_user, sig_type, payload, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    RETURNING id
-                """, [room, from_user, 'all', 'chat', payload_str, now])
-                row = cursor.fetchone()
-                if row:
-                    sig_id = row[0]
-        except Exception:
-            if room not in ROOM_SIGNALS:
-                ROOM_SIGNALS[room] = []
-            sig_id = len(ROOM_SIGNALS[room]) + 1
-            ROOM_SIGNALS[room].append({
-                'id': sig_id,
-                'from_user': from_user,
-                'to_user': 'all',
-                'type': 'chat',
-                'payload': payload,
-                'timestamp': now,
-            })
-
-        return Response({
-            'status': 'sent',
-            'id': sig_id,
-            'room': room,
-            'message': payload
-        }, status=status.HTTP_201_CREATED)
 
 
 class InterviewCleanupDummiesView(generics.GenericAPIView):
@@ -581,23 +499,29 @@ class InterviewCleanupDummiesView(generics.GenericAPIView):
         users_all = list(User.objects.values('id', 'email', 'first_name', 'last_name', 'role'))
 
         if action == 'clean':
-            from django.db import connection
-            with connection.cursor() as cursor:
-                cursor.execute("DELETE FROM interviews_interviewfeedback")
-                cursor.execute("DELETE FROM interviews_interview")
-                cursor.execute("DELETE FROM applications_jobapplication")
-                cursor.execute("DELETE FROM candidates_candidateskill")
-                cursor.execute("DELETE FROM candidates_candidateprofile")
-                cursor.execute("DELETE FROM accounts_user WHERE id IN (5, 6, 7) OR email LIKE '%bhai%' OR email LIKE '%dummy%'")
-                row_counts = cursor.rowcount
+            from jobs.models import Job
+            from accounts.models import UserRole
+            # Remove all dummy accounts
+            dummy_emails = ['amira@talentai.io', 'marcus@talentai.io', 'recruiter@talentai.io', 'test@talentai.io', 'candidate@talentai.io']
+            User.objects.filter(email__in=dummy_emails).delete()
+            # Remove legacy dummy jobs
+            Job.objects.filter(title__in=[
+                "Senior Full Stack AI Engineer",
+                "Lead Flutter & Mobile Systems Architect",
+                "Staff Infrastructure & DevOps Engineer",
+                "Senior Product Manager (AI Platform)"
+            ]).delete()
+            # Clear test interviews
+            Interview.objects.filter(title__icontains='Demo').delete()
 
             ACTIVE_ROOMS.clear()
             ROOM_SIGNALS.clear()
 
             return Response({
                 'status': 'cleaned',
-                'raw_affected': row_counts,
+                'super_admin': 'admin@talentai.io',
                 'interviews_remaining': Interview.objects.count(),
+                'jobs_remaining': Job.objects.count(),
                 'users_remaining': list(User.objects.values('id', 'email', 'first_name', 'last_name', 'role')),
             })
 
