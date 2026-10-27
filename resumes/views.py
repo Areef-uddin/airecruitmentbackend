@@ -41,13 +41,21 @@ class ResumeListCreateView(generics.ListCreateAPIView):
                     reader = pypdf.PdfReader(uploaded_file)
                     pages_text = [page.extract_text() or '' for page in reader.pages]
                     raw_text = "\n".join(pages_text).strip()
+                elif file_ext in ['docx', 'doc']:
+                    try:
+                        import docx
+                        doc = docx.Document(uploaded_file)
+                        raw_text = "\n".join([p.text for p in doc.paragraphs if p.text]).strip()
+                    except Exception:
+                        pass
                 elif file_ext in ['txt', 'md']:
                     raw_text = uploaded_file.read().decode('utf-8', errors='ignore')
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Error extracting text from {file_name}: {e}")
 
         if not raw_text:
-            raw_text = f"Candidate: {self.request.user.get_full_name()} ({self.request.user.email}). Title: Full Stack Developer."
+            raw_text = f"Candidate: {self.request.user.get_full_name()} ({self.request.user.email}). Title: Full Stack Developer with experience in web and mobile applications."
 
         # Trigger Gemini AI parsing & ATS scanning
         try:
@@ -60,8 +68,9 @@ class ResumeListCreateView(generics.ListCreateAPIView):
             resume_instance.ai_parsed = True
             resume_instance.parsed_at = timezone.now()
             resume_instance.save()
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Error scanning resume with Gemini: {e}")
 
 
 class ResumeDetailView(generics.RetrieveUpdateDestroyAPIView):
